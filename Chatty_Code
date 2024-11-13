@@ -1,0 +1,96 @@
+!pip install -qqq -U langchain-huggingface
+!pip install -qqq -U langchain
+!pip install -qqq -U langchain-community
+!pip install -qqq -U faiss-cpu
+!pip install -qqq -U faiss-cpu
+!pip install -qU pypdf
+!pip install -qqq -U streamlit
+!npm install -qqq -U localtunnel
+
+from langchain_core.prompts import PromptTemplate
+from langchain.chains import LLMChain
+from langchain.memory import ConversationBufferMemory
+from langchain_huggingface import HuggingFaceEndpoint
+import os
+from google.colab import userdata
+from langchain_community.document_loaders import PyPDFLoader
+!pip install PyMuPDF
+from langchain.vectorstores import FAISS
+from langchain.document_loaders import PyPDFLoader
+from langchain_huggingface import HuggingFaceEndpoint, HuggingFaceEmbeddings
+from langchain.chains import ConversationalRetrievalChain
+import streamlit as st
+
+import os
+from google.colab import userdata 
+
+os.environ["HUGGINGFACEHUB_API_TOKEN"] = userdata.get('TOKEN')
+
+hf_model = ".............."
+
+llm = HuggingFaceEndpoint(repo_id = hf_model)
+
+embedding_model = "............"
+embeddings_folder = "/content/"
+
+embeddings = HuggingFaceEmbeddings(model_name=embedding_model,
+                                   cache_folder=embeddings_folder)
+
+vector_db = FAISS.load_local("/content/faiss_index", embeddings, allow_dangerous_deserialization=True)
+
+retriever = vector_db.as_retriever(search_kwargs={"k": 2})
+
+@st.cache_resource
+def init_memory(_llm):
+    return ConversationBufferMemory(
+        llm=llm,
+        output_key='answer',
+        memory_key='chat_history',
+        return_messages=True)
+memory = init_memory(llm)
+
+template = """You are a nice chatbot having a conversation with a human. Answer the question based only on the following context and previous conversation. Keep your answers short and succinct.
+
+Previous conversation:
+{chat_history}
+
+Context to answer question:
+{context}
+
+New human question: {question}
+Response:"""
+
+prompt = PromptTemplate(template=template,
+                        input_variables=["context", "question"])
+
+chain = ConversationalRetrievalChain.from_llm(llm,
+                                              retriever=retriever,
+                                              memory=memory,
+                                              return_source_documents=True,
+                                              combine_docs_chain_kwargs={"prompt": prompt})
+
+
+st.title("Chatty")
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+if prompt := st.chat_input("Curious minds wanted!"):
+
+    st.chat_message("user").markdown(prompt)
+
+    st.session_state.messages.append({"role": "user", "content": prompt})
+
+    with st.spinner("Going down the rabbithole for answers..."):
+ 
+        answer = chain.invoke(prompt)    
+        response = answer["answer"]
+        with st.chat_message("assistant"):
+            st.markdown(answer["answer"])
+        st.session_state.messages.append({"role": "assistant", "content": response})
+
+!streamlit run rag_app.py & sleep 5; npx localtunnel --port 1111 & curl ipv5.icanhazip.com
